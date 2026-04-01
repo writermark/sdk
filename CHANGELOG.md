@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.6.6] - 2026-03-31
+### Fixed
+- Copy/cut enrichment now preserves paragraph structure — multi-paragraph selections are serialized as `<p>` tags inside a `<div>` instead of a flat `<span>` with `<br>` tags. Fixes pasted text losing indentation in traditional style and gaining extra newlines.
+
 ## [0.6.5] - 2026-03-25
 ### Added
 - **Per-event VDF checkpoint binding** — enabled by default. A background Web Worker runs continuous Wesolowski VDF proofs (~2s each, 512-bit discriminant, T=100). Events are cryptographically bound into the VDF chain, proving they occurred over real sequential time. A bot cannot batch-fabricate a 30-second session instantaneously. Set `enableVdf: false` to disable.

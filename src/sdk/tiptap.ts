@@ -569,8 +569,9 @@ async function deriveCertAndEnrichClipboard(
   }
 
   const data = await res.json()
-  const escapedText = escapeHtml(selectedText).replace(/\n/g, '<br>')
-  const enrichedHtml = `<span data-writermark-token="${data.token}">${escapedText}</span>`
+  const lines = selectedText.split('\n')
+  const innerHtml = lines.map(line => `<p>${escapeHtml(line)}</p>`).join('')
+  const enrichedHtml = `<div data-writermark-token="${data.token}">${innerHtml}</div>`
 
   try {
     await navigator.clipboard.write([
