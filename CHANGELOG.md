@@ -1,8 +1,8 @@
 # Changelog
 
-## [0.6.7] - 2026-03-31
+## [0.6.8] - 2026-03-31
 ### Fixed
-- Copy/cut enrichment now preserves full document structure (headings, lists, blockquotes, etc.) — the editor's actual HTML is captured from the DOM selection before `preventDefault()` and used as the clipboard HTML payload. Previously, all structure was flattened to `<p>` tags, causing headings and bullets to paste as plain paragraphs.
+- Copy/cut enrichment now preserves full document structure (headings, lists, blockquotes, etc.). Instead of calling `preventDefault()` and rebuilding HTML from plain text (which flattened everything to `<p>` tags), the SDK now lets ProseMirror handle clipboard serialization natively and reads its structured HTML from `clipboardData`. The writermark token is injected into ProseMirror's existing HTML (preserving `data-pm-slice` metadata) rather than wrapping in a new `<div>`. Cut no longer manually deletes the selection — ProseMirror already handles that.
 
 ## [0.6.6] - 2026-03-31
 ### Fixed

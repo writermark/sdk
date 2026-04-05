@@ -233,9 +233,15 @@ export function attachToTipTap(
   document.addEventListener('keydown', earlyKeyDetect, true)
 
   // ---- Copy handler ----
+  // ProseMirror's copy handler runs BEFORE ours (registered earlier on the
+  // same DOM element). By the time we fire, clipboardData already contains
+  // ProseMirror's correctly serialized HTML (with data-pm-slice and full
+  // document structure). We read it, enrich it with the writermark token
+  // asynchronously, and overwrite the system clipboard. We never call
+  // preventDefault — ProseMirror already did.
   const handleCopy = (e: ClipboardEvent) => {
-    const sel = document.getSelection()
-    const selectedText = sel?.toString() ?? ''
+    const selectedText = e.clipboardData?.getData('text/plain') || document.getSelection()?.toString() || ''
+    const pmHtml = e.clipboardData?.getData('text/html') ?? ''
     const selFrom = getCursorPos()
     const copyLen = selectedText.length
     if (selectedText.length > 0) {
@@ -251,9 +257,6 @@ export function attachToTipTap(
       ctx.checkpoint &&
       ctx.writermarkUrl
     ) {
-      const selectionHtml = getSelectionHtml()
-      e.preventDefault()
-
       const currentNormalized = normalizeText(editor.getText())
       const textIsDirty = currentNormalized !== ctx.merkleNormalizedText
 
@@ -262,29 +265,24 @@ export function attachToTipTap(
         ctx.flushAndCertify().then(() => {
           if (!ctx.merkleTree || !ctx.checkpoint || !ctx.isPassing) {
             if (debug) console.log('[writermark] copy: certify did not produce a valid state, falling back')
-            navigator.clipboard.writeText(selectedText).catch(() => {})
             return
           }
           if (debug) console.log('[writermark] copy: enriching clipboard via /derive (after forced certify)', selectedText.length, 'chars')
           return deriveCertAndEnrichClipboard(
             selectedText, editor, ctx.checkpoint, ctx.merkleTree, ctx.writermarkUrl,
-            ctx.authorshipMap ?? undefined, debug, ctx.merkleNormalizedText, selectionHtml,
+            ctx.authorshipMap ?? undefined, debug, ctx.merkleNormalizedText, pmHtml,
           )
         }).catch((err) => {
-          if (debug) console.warn('[writermark] copy: forced certify + /derive failed, falling back', err)
-          navigator.clipboard.writeText(selectedText).catch(() => {})
+          if (debug) console.warn('[writermark] copy: forced certify + /derive failed', err)
         })
       } else if (ctx.merkleTree) {
         if (debug) console.log('[writermark] copy: enriching clipboard via /derive', selectedText.length, 'chars')
         deriveCertAndEnrichClipboard(
           selectedText, editor, ctx.checkpoint, ctx.merkleTree, ctx.writermarkUrl,
-          ctx.authorshipMap ?? undefined, debug, ctx.merkleNormalizedText, selectionHtml,
+          ctx.authorshipMap ?? undefined, debug, ctx.merkleNormalizedText, pmHtml,
         ).catch((err) => {
-          if (debug) console.warn('[writermark] copy: /derive failed, falling back to plain text', err)
-          navigator.clipboard.writeText(selectedText).catch(() => {})
+          if (debug) console.warn('[writermark] copy: /derive failed', err)
         })
-      } else {
-        navigator.clipboard.writeText(selectedText).catch(() => {})
       }
     } else if (debug && ctx) {
       console.log('[writermark] copy: skipping enrichment —', {
@@ -298,9 +296,12 @@ export function attachToTipTap(
   }
 
   // ---- Cut handler ----
+  // Same approach as copy: ProseMirror's handler already serialized HTML,
+  // called preventDefault, AND deleted the selection. We read from
+  // clipboardData and asynchronously enrich.
   const handleCut = (e: ClipboardEvent) => {
-    const sel = document.getSelection()
-    const selectedText = sel?.toString() ?? ''
+    const selectedText = e.clipboardData?.getData('text/plain') || ''
+    const pmHtml = e.clipboardData?.getData('text/html') ?? ''
     const selFrom = getCursorPos()
     const copyLen = selectedText.length
     if (selectedText.length > 0) {
@@ -316,52 +317,29 @@ export function attachToTipTap(
       ctx.checkpoint &&
       ctx.writermarkUrl
     ) {
-      const selectionHtml = getSelectionHtml()
-      e.preventDefault()
-
-      const deleteSelection = () => {
-        try {
-          if (editor.chain && editor.state) {
-            const { from, to } = editor.state.selection
-            editor.chain().focus().deleteRange({ from, to }).run()
-          } else {
-            document.execCommand('delete')
-          }
-        } catch {
-          document.execCommand('delete')
-        }
-      }
-
       const currentNormalized = normalizeText(editor.getText())
       const textIsDirty = currentNormalized !== ctx.merkleNormalizedText
 
       if (textIsDirty && ctx.flushAndCertify) {
         if (debug) console.log('[writermark] cut: text changed since last certify, forcing certify first')
         ctx.flushAndCertify().then(() => {
-          deleteSelection()
           if (!ctx.merkleTree || !ctx.checkpoint || !ctx.isPassing) {
-            navigator.clipboard.writeText(selectedText).catch(() => {})
             return
           }
           return deriveCertAndEnrichClipboard(
             selectedText, editor, ctx.checkpoint, ctx.merkleTree, ctx.writermarkUrl,
-            ctx.authorshipMap ?? undefined, debug, ctx.merkleNormalizedText, selectionHtml,
+            ctx.authorshipMap ?? undefined, debug, ctx.merkleNormalizedText, pmHtml,
           )
-        }).catch(() => {
-          deleteSelection()
-          navigator.clipboard.writeText(selectedText).catch(() => {})
+        }).catch((err) => {
+          if (debug) console.warn('[writermark] cut: forced certify + /derive failed', err)
         })
       } else if (ctx.merkleTree) {
-        deleteSelection()
         deriveCertAndEnrichClipboard(
           selectedText, editor, ctx.checkpoint, ctx.merkleTree, ctx.writermarkUrl,
-          ctx.authorshipMap ?? undefined, debug, ctx.merkleNormalizedText, selectionHtml,
-        ).catch(() => {
-          navigator.clipboard.writeText(selectedText).catch(() => {})
+          ctx.authorshipMap ?? undefined, debug, ctx.merkleNormalizedText, pmHtml,
+        ).catch((err) => {
+          if (debug) console.warn('[writermark] cut: /derive failed', err)
         })
-      } else {
-        deleteSelection()
-        navigator.clipboard.writeText(selectedText).catch(() => {})
       }
     }
   }
@@ -505,13 +483,17 @@ export function attachToTipTap(
 // Derive cert and write enriched clipboard
 // ============================================================
 
-function getSelectionHtml(): string {
-  const sel = document.getSelection()
-  if (!sel || sel.rangeCount === 0) return ''
-  const range = sel.getRangeAt(0)
-  const container = document.createElement('div')
-  container.appendChild(range.cloneContents())
-  return container.innerHTML
+/**
+ * Inject data-writermark-token into existing HTML by adding the attribute
+ * to the first opening tag. This preserves ProseMirror's data-pm-slice
+ * and all structural HTML intact.
+ */
+function injectTokenIntoHtml(html: string, token: string): string {
+  const match = html.match(/^(<[a-zA-Z][a-zA-Z0-9]*)([\s>])/)
+  if (match) {
+    return `${match[1]} data-writermark-token="${token}"${match[2]}${html.slice(match[0].length)}`
+  }
+  return `<div data-writermark-token="${token}">${html}</div>`
 }
 
 async function deriveCertAndEnrichClipboard(
@@ -523,7 +505,7 @@ async function deriveCertAndEnrichClipboard(
   authorshipMap?: AuthorshipMap,
   debug = false,
   merkleNormalizedText?: string | null,
-  selectionHtml?: string,
+  pmHtml?: string,
 ): Promise<void> {
   const normalizedExcerpt = normalizeText(selectedText)
 
@@ -577,10 +559,11 @@ async function deriveCertAndEnrichClipboard(
   }
 
   const data = await res.json()
-  const innerHtml = selectionHtml || selectedText.split('\n').map(line =>
-    `<p>${line.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')}</p>`
-  ).join('')
-  const enrichedHtml = `<div data-writermark-token="${data.token}">${innerHtml}</div>`
+  const enrichedHtml = pmHtml
+    ? injectTokenIntoHtml(pmHtml, data.token)
+    : `<div data-writermark-token="${data.token}">${selectedText.split('\n').map(line =>
+        `<p>${line.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')}</p>`
+      ).join('')}</div>`
 
   try {
     await navigator.clipboard.write([
