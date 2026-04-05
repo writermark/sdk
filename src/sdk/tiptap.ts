@@ -251,6 +251,7 @@ export function attachToTipTap(
       ctx.checkpoint &&
       ctx.writermarkUrl
     ) {
+      const selectionHtml = getSelectionHtml()
       e.preventDefault()
 
       const currentNormalized = normalizeText(editor.getText())
@@ -267,7 +268,7 @@ export function attachToTipTap(
           if (debug) console.log('[writermark] copy: enriching clipboard via /derive (after forced certify)', selectedText.length, 'chars')
           return deriveCertAndEnrichClipboard(
             selectedText, editor, ctx.checkpoint, ctx.merkleTree, ctx.writermarkUrl,
-            ctx.authorshipMap ?? undefined, debug, ctx.merkleNormalizedText,
+            ctx.authorshipMap ?? undefined, debug, ctx.merkleNormalizedText, selectionHtml,
           )
         }).catch((err) => {
           if (debug) console.warn('[writermark] copy: forced certify + /derive failed, falling back', err)
@@ -277,7 +278,7 @@ export function attachToTipTap(
         if (debug) console.log('[writermark] copy: enriching clipboard via /derive', selectedText.length, 'chars')
         deriveCertAndEnrichClipboard(
           selectedText, editor, ctx.checkpoint, ctx.merkleTree, ctx.writermarkUrl,
-          ctx.authorshipMap ?? undefined, debug, ctx.merkleNormalizedText,
+          ctx.authorshipMap ?? undefined, debug, ctx.merkleNormalizedText, selectionHtml,
         ).catch((err) => {
           if (debug) console.warn('[writermark] copy: /derive failed, falling back to plain text', err)
           navigator.clipboard.writeText(selectedText).catch(() => {})
@@ -315,6 +316,7 @@ export function attachToTipTap(
       ctx.checkpoint &&
       ctx.writermarkUrl
     ) {
+      const selectionHtml = getSelectionHtml()
       e.preventDefault()
 
       const deleteSelection = () => {
@@ -343,7 +345,7 @@ export function attachToTipTap(
           }
           return deriveCertAndEnrichClipboard(
             selectedText, editor, ctx.checkpoint, ctx.merkleTree, ctx.writermarkUrl,
-            ctx.authorshipMap ?? undefined, debug, ctx.merkleNormalizedText,
+            ctx.authorshipMap ?? undefined, debug, ctx.merkleNormalizedText, selectionHtml,
           )
         }).catch(() => {
           deleteSelection()
@@ -353,7 +355,7 @@ export function attachToTipTap(
         deleteSelection()
         deriveCertAndEnrichClipboard(
           selectedText, editor, ctx.checkpoint, ctx.merkleTree, ctx.writermarkUrl,
-          ctx.authorshipMap ?? undefined, debug, ctx.merkleNormalizedText,
+          ctx.authorshipMap ?? undefined, debug, ctx.merkleNormalizedText, selectionHtml,
         ).catch(() => {
           navigator.clipboard.writeText(selectedText).catch(() => {})
         })
@@ -503,8 +505,13 @@ export function attachToTipTap(
 // Derive cert and write enriched clipboard
 // ============================================================
 
-function escapeHtml(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+function getSelectionHtml(): string {
+  const sel = document.getSelection()
+  if (!sel || sel.rangeCount === 0) return ''
+  const range = sel.getRangeAt(0)
+  const container = document.createElement('div')
+  container.appendChild(range.cloneContents())
+  return container.innerHTML
 }
 
 async function deriveCertAndEnrichClipboard(
@@ -516,6 +523,7 @@ async function deriveCertAndEnrichClipboard(
   authorshipMap?: AuthorshipMap,
   debug = false,
   merkleNormalizedText?: string | null,
+  selectionHtml?: string,
 ): Promise<void> {
   const normalizedExcerpt = normalizeText(selectedText)
 
@@ -569,8 +577,9 @@ async function deriveCertAndEnrichClipboard(
   }
 
   const data = await res.json()
-  const lines = selectedText.split('\n')
-  const innerHtml = lines.map(line => `<p>${escapeHtml(line)}</p>`).join('')
+  const innerHtml = selectionHtml || selectedText.split('\n').map(line =>
+    `<p>${line.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')}</p>`
+  ).join('')
   const enrichedHtml = `<div data-writermark-token="${data.token}">${innerHtml}</div>`
 
   try {

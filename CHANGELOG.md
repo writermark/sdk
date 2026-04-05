@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.6.7] - 2026-03-31
+### Fixed
+- Copy/cut enrichment now preserves full document structure (headings, lists, blockquotes, etc.) — the editor's actual HTML is captured from the DOM selection before `preventDefault()` and used as the clipboard HTML payload. Previously, all structure was flattened to `<p>` tags, causing headings and bullets to paste as plain paragraphs.
+
 ## [0.6.6] - 2026-03-31
 ### Fixed
 - Copy/cut enrichment now preserves paragraph structure — multi-paragraph selections are serialized as `<p>` tags inside a `<div>` instead of a flat `<span>` with `<br>` tags. Fixes pasted text losing indentation in traditional style and gaining extra newlines.
